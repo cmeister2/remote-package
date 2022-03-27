@@ -1,8 +1,11 @@
 [package]
 name = "remote-package"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
 author = "Max Dymond <cmeister2@gmail.com>"
+description = "A simple crate to query remote packages for information."
+license = "MIT"
+repository = "https://github.com/cmeister2/remote-package"
 
 [dependencies]
 debpkg = "0.5.0"
