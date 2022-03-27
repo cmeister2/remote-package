@@ -51,8 +51,9 @@ where
 }
 
 impl RemotePackage for DebianRemotePackage {
-    fn package_name(&self) -> &str {
-        self.control.name()
+    fn package_name(&self) -> Result<&str, PkgError> {
+        // Just return the control name successfully
+        Ok(self.control.name())
     }
 }
 
@@ -67,6 +68,6 @@ mod tests {
         let url = "http://cz.archive.ubuntu.com/ubuntu/pool/universe/d/debian-faq/debian-faq_10.1_all.deb";
 
         let deb = DebianRemotePackage::new_from_url(url).expect("Failed to download package");
-        assert_eq!(deb.package_name(), "debian-faq");
+        assert_eq!(deb.package_name().unwrap(), "debian-faq");
     }
 }
