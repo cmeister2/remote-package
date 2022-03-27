@@ -1,50 +1,37 @@
-use debpkg::DebPkg;
-use std::io::Read;
+//! A simple crate to query remote packages for information.
+#![deny(
+    missing_debug_implementations,
+    missing_docs,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_extern_crates,
+    unused_import_braces,
+    unused_qualifications,
+    unused_results
+)]
 
+/// Error type for this crate.
 #[derive(thiserror::Error, Debug)]
 pub enum PkgError {
-    #[error("HTTP Error")]
-    HTTPError(#[from] reqwest::Error),
-
+    /// An error from the underlying Debian package library
+    #[cfg(feature = "debian")]
     #[error("Debpkg Error")]
     DebPkgError(#[from] debpkg::Error),
+
+    /// An error from the underlying HTTP client library
+    #[cfg(feature = "http")]
+    #[error("HTTP Error")]
+    HTTPError(#[from] reqwest::Error),
 }
 
+/// Trait representing a remote package.
+///
+/// All remote packages support these methods.
 pub trait RemotePackage {
-    fn name(&self) -> &str;
+    /// Get the package name according to the package itself.
+    fn package_name(&self) -> &str;
 }
 
-pub struct DebianRemotePackage {
-    control: debpkg::Control,
-}
-
-impl DebianRemotePackage {
-    pub fn new_from_url(url: &str) -> Result<Self, PkgError> {
-        let client = reqwest::blocking::Client::new();
-
-        // Send an HTTP request for the package and get the Response.
-        let response = client.get(url).send()?;
-
-        // blocking::Response impls Read, so we can pass it to debpkg.
-        let pkg = debpkg::DebPkg::parse(response)?;
-
-        // Pass the package to the general constructor
-        Self::new_from_control(pkg)
-    }
-
-    pub fn new_from_control<T: Read>(mut pkg: DebPkg<T>) -> Result<Self, PkgError> {
-        // Get the control archive from the package.
-        let archive = pkg.control()?;
-
-        // Parse the control information.
-        let control = debpkg::Control::extract(archive)?;
-
-        Ok(Self { control })
-    }
-}
-
-impl RemotePackage for DebianRemotePackage {
-    fn name(&self) -> &str {
-        self.control.name()
-    }
-}
+// Include debian package support
+#[cfg(feature = "debian")]
+pub mod debian;
