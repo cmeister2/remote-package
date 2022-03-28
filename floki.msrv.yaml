@@ -1,0 +1,10 @@
+image: rust:1.56.0
+forward_ssh_agent: true
+shell: bash
+volumes:
+  cargo-registry:
+    shared: true
+    mount: /usr/local/cargo/registry
+  cargo-git:
+    shared: true
+    mount: /usr/local/cargo/git
