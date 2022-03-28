@@ -104,4 +104,9 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: -v --out xml
+          args: --out xml
+      - uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./cobertura.xml
+          verbose: true
