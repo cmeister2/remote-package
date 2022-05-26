@@ -1,5 +1,5 @@
 //! Support for remote RPM packages
-use rpm::RPMPackage;
+use fez::RPMPackage;
 
 use crate::{PkgError, RemotePackage};
 
@@ -24,7 +24,7 @@ impl RpmRemotePackage {
         let mut buf_response = std::io::BufReader::new(response);
 
         // blocking::Response impls Read, so we can pass it to rpm-rs.
-        let package = rpm::RPMPackage::parse(&mut buf_response)?;
+        let package = fez::RPMPackage::parse(&mut buf_response)?;
 
         Ok(Self { package })
     }

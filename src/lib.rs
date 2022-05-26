@@ -19,8 +19,8 @@ pub enum PkgError {
 
     /// An error from the underlying RPM package library
     #[cfg(feature = "rpm")]
-    #[error("rpm-rs Error")]
-    RpmError(#[from] ::rpm::RPMError),
+    #[error("fez Error")]
+    RpmError(#[from] ::fez::RPMError),
 
     /// An error from the underlying HTTP client library
     #[cfg(feature = "http")]
