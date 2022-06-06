@@ -1,12 +1,15 @@
 //! Support for remote RPM packages
-use fez::RPMPackage;
+use std::cell::RefCell;
+
+use fez::{RPMPackageMetadata, RpmPkgReader};
+use reqwest::blocking::Response;
 
 use crate::{PkgError, RemotePackage};
 
 /// A structure representing a remote RPM package.
-#[derive(Debug)]
 pub struct RpmRemotePackage {
-    package: RPMPackage,
+    metadata: RPMPackageMetadata,
+    _package: RefCell<RpmPkgReader<Response>>,
 }
 
 impl RpmRemotePackage {
@@ -19,20 +22,25 @@ impl RpmRemotePackage {
         let client = reqwest::blocking::Client::new();
 
         // Send an HTTP request for the package and get the Response.
-        let response = client.get(url).send()?;
+        let response = client
+            .get(url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()?;
 
-        let mut buf_response = std::io::BufReader::new(response);
+        // blocking::Response impls Read, so we can pass it to fez.
+        let mut package = RpmPkgReader::parse(response)?;
+        let metadata = package.metadata()?;
 
-        // blocking::Response impls Read, so we can pass it to rpm-rs.
-        let package = fez::RPMPackage::parse(&mut buf_response)?;
-
-        Ok(Self { package })
+        Ok(Self {
+            metadata,
+            _package: RefCell::new(package),
+        })
     }
 }
 
 impl RemotePackage for RpmRemotePackage {
     fn package_name(&self) -> Result<&str, PkgError> {
-        Ok(self.package.metadata.header.get_name()?)
+        Ok(self.metadata.header.get_name()?)
     }
 }
 
@@ -43,10 +51,10 @@ mod tests {
     #[cfg(feature = "http")]
     #[test]
     fn test_package() {
-        // Pick a random small package from Centos 9
-        let url = "http://mirror.stream.centos.org/9-stream/AppStream/x86_64/os/Packages/khmer-os-muol-fonts-all-5.0-36.el9.noarch.rpm";
+        // Kibana is huge but should finish very quickly if just getting metadata.
+        let url = "https://artifacts.elastic.co/downloads/kibana/kibana-8.2.1-x86_64.rpm";
 
         let package = RpmRemotePackage::new_from_url(url).expect("Failed to download package");
-        assert_eq!(package.package_name().unwrap(), "khmer-os-muol-fonts-all");
+        assert_eq!(package.package_name().unwrap(), "kibana");
     }
 }
