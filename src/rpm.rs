@@ -1,15 +1,13 @@
 //! Support for remote RPM packages
-use std::cell::RefCell;
+use std::io::Read;
 
 use fez::{RPMPackageMetadata, RpmPkgReader};
-use reqwest::blocking::Response;
 
 use crate::{PkgError, RemotePackage};
 
 /// A structure representing a remote RPM package.
 pub struct RpmRemotePackage {
     metadata: RPMPackageMetadata,
-    _package: RefCell<RpmPkgReader<Response>>,
 }
 
 impl RpmRemotePackage {
@@ -27,20 +25,40 @@ impl RpmRemotePackage {
             .timeout(std::time::Duration::from_secs(10))
             .send()?;
 
-        // blocking::Response impls Read, so we can pass it to fez.
-        let mut package = RpmPkgReader::parse(response)?;
+        // blocking::Response impls Read, so we can pass it to new_from_read.
+        Self::new_from_read(response)
+    }
+
+    /// Attempts to create a `RpmRemotePackage` from something that impls
+    /// Read.
+    pub fn new_from_read<R: Read>(reader: R) -> Result<Self, PkgError> {
+        let mut package = RpmPkgReader::parse(reader)?;
         let metadata = package.metadata()?;
 
-        Ok(Self {
-            metadata,
-            _package: RefCell::new(package),
-        })
+        Ok(Self { metadata })
     }
 }
 
 impl RemotePackage for RpmRemotePackage {
+    fn package_type(&self) -> crate::RemotePackageType {
+        crate::RemotePackageType::Rpm
+    }
+
     fn package_name(&self) -> Result<&str, PkgError> {
         Ok(self.metadata.header.get_name()?)
+    }
+
+    fn package_version(&self) -> Result<&str, PkgError> {
+        Ok(self.metadata.header.get_version()?)
+    }
+
+    /// For RPM, the package iteration is the release.
+    fn package_iteration(&self) -> Option<&str> {
+        self.metadata.header.get_release().ok()
+    }
+
+    fn package_arch(&self) -> Result<&str, PkgError> {
+        Ok(self.metadata.header.get_arch()?)
     }
 }
 

@@ -25,8 +25,14 @@ impl DebianRemotePackage {
         // Send an HTTP request for the package and get the Response.
         let response = client.get(url).send()?;
 
-        // blocking::Response impls Read, so we can pass it to debpkg.
-        let pkg = debpkg::DebPkg::parse(response)?;
+        // Response impls Read, so pass it to new_from_read().
+        Self::new_from_read(response)
+    }
+
+    /// Attempts to create a `DebianRemotePackage` from something that impls
+    /// Read.
+    pub fn new_from_read<R: Read>(reader: R) -> Result<Self, PkgError> {
+        let pkg = debpkg::DebPkg::parse(reader)?;
 
         // Pass the package to the general constructor
         Self::try_from(pkg)
@@ -51,9 +57,33 @@ where
 }
 
 impl RemotePackage for DebianRemotePackage {
+    fn package_type(&self) -> crate::RemotePackageType {
+        crate::RemotePackageType::Deb
+    }
+
     fn package_name(&self) -> Result<&str, PkgError> {
         // Just return the control name successfully
         Ok(self.control.name())
+    }
+
+    fn package_version(&self) -> Result<&str, PkgError> {
+        Ok(self.control.version())
+    }
+
+    fn package_arch(&self) -> Result<&str, PkgError> {
+        self.control
+            .get("Architecture")
+            .ok_or_else(|| PkgError::DebianControlFieldNotFound("Architecture".to_string()))
+    }
+
+    /// For Debian, the package iteration is the debian_revision.
+    fn package_iteration(&self) -> Option<&str> {
+        // Start by getting the version.
+        let version = self.control.version();
+
+        // Split the version on "-". If there's a debian_revision, it'll be
+        // the matched suffix.
+        version.rsplit_once('-').map(|(_prefix, suffix)| suffix)
     }
 }
 
