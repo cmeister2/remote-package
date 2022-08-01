@@ -6,6 +6,10 @@ on:
       # Prerelease version
       - "[0-9]+.[0-9]+.[0-9]+-*"
 
+    # Run on merges into main
+    branches:
+      - main
+
   pull_request:
     branches:
       # Trigger on pull requests into main
