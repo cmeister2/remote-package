@@ -6,14 +6,14 @@ authors = ["Max Dymond <cmeister2@gmail.com>"]
 description = "A simple crate to query remote packages for information."
 license = "MIT"
 repository = "https://github.com/cmeister2/remote-package"
-rust-version = "1.56"
+rust-version = "1.59"
 keywords = ["rpm", "debian", "package"]
 categories = ["development-tools"]
 
 [dependencies]
 debpkg = { version = "0.6.0", optional = true }
 reqwest = { version = "0.11.10", features = ["blocking"], optional = true }
-fez = { version = "0.2.0", optional = true }
+fez = { version = "0.8.1", optional = true }
 thiserror = "1.0.30"
 infer = "0.11.0"
 
