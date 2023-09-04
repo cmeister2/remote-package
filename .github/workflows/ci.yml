@@ -28,7 +28,7 @@ jobs:
           - stable
           - 1.56.0
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -47,7 +47,7 @@ jobs:
           - stable
           - 1.56.0
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -66,7 +66,7 @@ jobs:
           - stable
           - 1.56.0
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -87,7 +87,7 @@ jobs:
           - stable
           - 1.56.0
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -107,7 +107,7 @@ jobs:
         rust:
           - stable
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -136,7 +136,7 @@ jobs:
       - clippy
       - tarpaulin
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install rust
         uses: actions-rs/toolchain@v1
         with:
