@@ -32,7 +32,7 @@ impl DebianRemotePackage {
     /// Attempts to create a `DebianRemotePackage` from something that impls
     /// Read.
     pub fn new_from_read<R: Read>(reader: R) -> Result<Self, PkgError> {
-        let pkg = debpkg::DebPkg::parse(reader)?;
+        let pkg = DebPkg::parse(reader)?;
 
         // Pass the package to the general constructor
         Self::try_from(pkg)

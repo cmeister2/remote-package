@@ -1,7 +1,9 @@
 //! Support for remote RPM packages
 use std::io::Read;
 
-use fez::{RPMPackageMetadata, RpmPkgReader};
+use fez::RPMPackageMetadata;
+use futures::{io::AllowStdIo, FutureExt};
+use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 use crate::{PkgError, RemotePackage};
 
@@ -32,8 +34,21 @@ impl RpmRemotePackage {
     /// Attempts to create a `RpmRemotePackage` from something that impls
     /// Read.
     pub fn new_from_read<R: Read>(reader: R) -> Result<Self, PkgError> {
-        let mut package = RpmPkgReader::parse(reader)?;
-        let metadata = package.metadata()?;
+        // Box preserves the public Read-only bound for readers that are not Unpin.
+        // The compatibility adapter performs exact metadata reads without a Tokio
+        // runtime or a buffering layer that could fetch the package payload.
+        let mut reader = AllowStdIo::new(Box::new(reader)).compat();
+        // Fez's metadata parser only awaits exact reads. AllowStdIo always
+        // returns Ready, and Tokio's read_exact adds no cooperative suspension.
+        // Polling once also preserves use inside an existing async executor.
+        let metadata = RPMPackageMetadata::parse_async(&mut reader)
+            .now_or_never()
+            .ok_or_else(|| {
+                fez::RPMError::Io(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "RPM metadata parser unexpectedly suspended on a blocking reader",
+                ))
+            })??;
 
         Ok(Self { metadata })
     }
@@ -65,6 +80,56 @@ impl RemotePackage for RpmRemotePackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_metadata_inside_an_executor_without_reading_payload_or_requiring_unpin() {
+        use std::{cell::Cell, io::Cursor, marker::PhantomPinned, rc::Rc};
+
+        let package = fez::RPMBuilder::new("metadata-test", "1.2.3", "MIT", "x86_64", "fixture")
+            .build()
+            .unwrap();
+        assert!(!package.content.is_empty());
+        let mut bytes = Vec::new();
+        package.write(&mut bytes).unwrap();
+        let metadata_length = bytes.len() - package.content.len();
+
+        struct MetadataReader {
+            bytes: Cursor<Vec<u8>>,
+            metadata_length: usize,
+            bytes_read: Rc<Cell<usize>>,
+            _pinned: PhantomPinned,
+        }
+
+        impl Read for MetadataReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let remaining = self.metadata_length - self.bytes.position() as usize;
+                assert!(
+                    remaining > 0,
+                    "RPM metadata parsing tried to read the payload"
+                );
+                let length = buffer.len().min(remaining);
+                let read = self.bytes.read(&mut buffer[..length])?;
+                self.bytes_read.set(self.bytes.position() as usize);
+                Ok(read)
+            }
+        }
+
+        let bytes_read = Rc::new(Cell::new(0));
+        let reader = MetadataReader {
+            bytes: Cursor::new(bytes),
+            metadata_length,
+            bytes_read: Rc::clone(&bytes_read),
+            _pinned: PhantomPinned,
+        };
+        let metadata =
+            futures::executor::block_on(
+                async move { RpmRemotePackage::new_from_read(reader).unwrap() },
+            );
+        assert_eq!(metadata.package_name().unwrap(), "metadata-test");
+        assert_eq!(metadata.package_version().unwrap(), "1.2.3");
+        assert_eq!(metadata.package_arch().unwrap(), "x86_64");
+        assert_eq!(bytes_read.get(), metadata_length);
+    }
 
     #[cfg(feature = "http")]
     #[test]

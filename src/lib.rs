@@ -130,7 +130,7 @@ pub fn from_url(url: &str) -> Result<Box<dyn RemotePackage>, PkgError> {
     ))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http"))]
 mod tests {
     use super::*;
 
