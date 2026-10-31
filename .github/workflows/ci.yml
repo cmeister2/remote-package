@@ -26,7 +26,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.56.0
+          - 1.59.0
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -37,6 +37,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: check
+          args: --locked
 
   test:
     name: Test Suite
@@ -45,7 +46,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.56.0
+          - 1.59.0
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -56,6 +57,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --locked
 
   fmt:
     name: Rustfmt
@@ -64,7 +66,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.56.0
+          - 1.59.0
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -85,7 +87,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.56.0
+          - 1.59.0
     steps:
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
@@ -97,7 +99,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --locked -- -D warnings
 
   tarpaulin:
     name: Tarpaulin
@@ -120,7 +122,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --out xml
+          args: --locked --out xml
       - uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
