@@ -30,8 +30,8 @@ pub enum PkgError {
 
     /// An error from the underlying RPM package library
     #[cfg(feature = "rpm")]
-    #[error("fez Error")]
-    RpmError(#[from] ::fez::RPMError),
+    #[error("RPM error: {0}")]
+    RpmError(#[from] ::rpm::Error),
 
     /// An error from the underlying HTTP client library
     #[cfg(feature = "http")]
@@ -60,9 +60,17 @@ pub trait RemotePackage {
     fn package_type(&self) -> RemotePackageType;
 
     /// Get the package name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the package metadata does not contain a valid name.
     fn package_name(&self) -> Result<&str, PkgError>;
 
     /// Get the package version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the package metadata does not contain a valid version.
     fn package_version(&self) -> Result<&str, PkgError>;
 
     /// Get the package iteration. Different package types get this from
@@ -70,6 +78,10 @@ pub trait RemotePackage {
     fn package_iteration(&self) -> Option<&str>;
 
     /// Get the package architecture.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the package metadata does not contain a valid architecture.
     fn package_arch(&self) -> Result<&str, PkgError>;
 }
 
@@ -83,8 +95,13 @@ pub mod rpm;
 
 /// Create a RemotePackage from a URL.
 ///
-/// Uses a blocking tokio client to download the remote package - if
-/// using this in an async environment, surround this with tokio::spawn_blocking.
+/// Uses a blocking HTTP client. In an async environment, call this from
+/// `tokio::task::spawn_blocking`.
+///
+/// # Errors
+///
+/// Returns an error if the request fails, the response has an HTTP error status,
+/// the package type cannot be detected or is disabled, or its metadata is invalid.
 #[cfg(feature = "http")]
 pub fn from_url(url: &str) -> Result<Box<dyn RemotePackage>, PkgError> {
     use std::io::Read;
@@ -92,7 +109,7 @@ pub fn from_url(url: &str) -> Result<Box<dyn RemotePackage>, PkgError> {
     let client = reqwest::blocking::Client::new();
 
     // Send an HTTP request for the package and get the Response.
-    let response = client.get(url).send()?;
+    let response = client.get(url).send()?.error_for_status()?;
 
     // Read the first 1024 bytes for infer.
     let mut reader = response.take(1024);
@@ -103,22 +120,20 @@ pub fn from_url(url: &str) -> Result<Box<dyn RemotePackage>, PkgError> {
 
     // Infer uses magic to detect file types from starting bytes.
     let ext = infer::get(&infer_buf).map(|t| t.extension());
-    let is_deb = infer::archive::is_deb(&infer_buf);
-    let is_rpm = infer::archive::is_rpm(&infer_buf);
-
     // Using a cursor and chain allows us to reconstruct the original response.
+    #[cfg(any(feature = "debian", feature = "rpm"))]
     let rsp = std::io::Cursor::new(infer_buf).chain(reader.into_inner());
 
     // If the feature is enabled and the package is Debian, make a Debian remote package.
     #[cfg(feature = "debian")]
-    if is_deb {
+    if ext == Some("deb") {
         let pkg = debian::DebianRemotePackage::new_from_read(rsp)?;
         return Ok(Box::new(pkg));
     }
 
     // If the feature is enabled and the package is RPM, make an RPM remote package.
     #[cfg(feature = "rpm")]
-    if is_rpm {
+    if ext == Some("rpm") {
         let pkg = rpm::RpmRemotePackage::new_from_read(rsp)?;
         return Ok(Box::new(pkg));
     }
@@ -130,42 +145,157 @@ pub fn from_url(url: &str) -> Result<Box<dyn RemotePackage>, PkgError> {
     ))
 }
 
-#[cfg(all(test, feature = "http"))]
+#[cfg(test)]
 mod tests {
-    use super::*;
+    //! In-memory package fixtures and loopback HTTP integration tests.
 
     #[cfg(feature = "http")]
-    fn test_from_url(url: &str, package_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let package = from_url(url).expect("Failed to download package");
+    use super::*;
 
-        println!(
-            "{}:{}:{}:{}",
-            package.package_name()?,
-            package.package_version()?,
-            package.package_arch()?,
-            package.package_iteration().unwrap_or("no iteration")
-        );
-        assert_eq!(package.package_name()?, package_name);
-        Ok(())
+    /// Build a small Debian package containing the supplied control fields.
+    #[cfg(feature = "debian")]
+    pub(crate) fn debian_package_bytes(control: &str) -> Vec<u8> {
+        let mut control_tar = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(control.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        control_tar
+            .append_data(&mut header, "./control", control.as_bytes())
+            .unwrap();
+        let control_tar = control_tar.into_inner().unwrap();
+
+        let mut package = ar::Builder::new(Vec::new());
+        package
+            .append(
+                &ar::Header::new(b"debian-binary".to_vec(), 4),
+                &b"2.0\n"[..],
+            )
+            .unwrap();
+        package
+            .append(
+                &ar::Header::new(b"control.tar".to_vec(), control_tar.len() as u64),
+                control_tar.as_slice(),
+            )
+            .unwrap();
+        package.into_inner().unwrap()
     }
 
+    /// Build a small RPM fixture with a release distinct from its version.
+    #[cfg(all(feature = "http", feature = "rpm"))]
+    pub(crate) fn rpm_package_bytes() -> Vec<u8> {
+        let package =
+            ::rpm::PackageBuilder::new("metadata-test", "1.2.3", "MIT", "x86_64", "HTTP fixture")
+                .release("4")
+                .build()
+                .unwrap();
+        let mut bytes = Vec::new();
+        package.write(&mut bytes).unwrap();
+        bytes
+    }
+
+    /// Serve a fixture once from a local HTTP endpoint.
+    #[cfg(feature = "http")]
+    pub(crate) fn serve_package(bytes: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        serve_response("200 OK", bytes)
+    }
+
+    /// Serve a response with a chosen status, independent of external hosts.
+    #[cfg(feature = "http")]
+    pub(crate) fn serve_response(
+        status: &'static str,
+        bytes: Vec<u8>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            thread,
+            time::Duration,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/package", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+                assert!(
+                    request.len() < 8192,
+                    "HTTP request headers exceeded test limit"
+                );
+            }
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bytes.len()
+            )
+            .unwrap();
+            stream.write_all(&bytes).unwrap();
+        });
+        (url, server)
+    }
+
+    /// Verify inferred RPM metadata through the real HTTP client.
     #[cfg(all(feature = "http", feature = "rpm"))]
     #[test]
-    fn test_from_url_rpm() -> Result<(), Box<dyn std::error::Error>> {
-        // Kibana is huge but should finish very quickly if just getting metadata.
-        test_from_url(
-            "https://artifacts.elastic.co/downloads/kibana/kibana-8.2.1-x86_64.rpm",
-            "kibana",
-        )
+    fn test_from_url_rpm() {
+        let (url, server) = serve_package(rpm_package_bytes());
+        let package = from_url(&url).unwrap();
+        assert!(matches!(package.package_type(), RemotePackageType::Rpm));
+        assert_eq!(package.package_name().unwrap(), "metadata-test");
+        assert_eq!(package.package_version().unwrap(), "1.2.3");
+        assert_eq!(package.package_arch().unwrap(), "x86_64");
+        assert_eq!(package.package_iteration(), Some("4"));
+        server.join().unwrap();
     }
 
+    /// Verify inferred Debian metadata through the real HTTP client.
     #[cfg(all(feature = "http", feature = "debian"))]
     #[test]
-    fn test_from_url_deb() -> Result<(), Box<dyn std::error::Error>> {
-        // Test a small Debian package.
-        test_from_url(
-            "http://cz.archive.ubuntu.com/ubuntu/pool/universe/d/debian-faq/debian-faq_10.1_all.deb",
-            "debian-faq",
-        )
+    fn test_from_url_deb() {
+        let bytes = debian_package_bytes(
+            "Package: metadata-test\nVersion: 1.2.3-4\nArchitecture: all\nDescription: HTTP fixture\n",
+        );
+        let (url, server) = serve_package(bytes);
+        let package = from_url(&url).unwrap();
+        assert!(matches!(package.package_type(), RemotePackageType::Deb));
+        assert_eq!(package.package_name().unwrap(), "metadata-test");
+        assert_eq!(package.package_version().unwrap(), "1.2.3-4");
+        assert_eq!(package.package_arch().unwrap(), "all");
+        assert_eq!(package.package_iteration(), Some("4"));
+        server.join().unwrap();
+    }
+
+    /// Unknown files retain a useful format error rather than a parser error.
+    #[cfg(feature = "http")]
+    #[test]
+    fn rejects_unknown_package_type() {
+        let (url, server) = serve_package(b"Not a package".to_vec());
+        assert!(matches!(
+            from_url(&url),
+            Err(PkgError::UnknownPackageType(format)) if format == "unknown"
+        ));
+        server.join().unwrap();
+    }
+
+    /// HTTP failures are reported before attempting package detection.
+    #[cfg(feature = "http")]
+    #[test]
+    fn reports_http_status_errors() {
+        let (url, server) = serve_response("404 Not Found", Vec::new());
+        assert!(matches!(
+            from_url(&url),
+            Err(PkgError::HTTPError(error)) if error.status() == Some(reqwest::StatusCode::NOT_FOUND)
+        ));
+        server.join().unwrap();
     }
 }

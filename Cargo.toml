@@ -1,26 +1,38 @@
 [package]
 name = "remote-package"
 version = "0.3.0"
-edition = "2018"
+edition = "2024"
 authors = ["Max Dymond <cmeister2@gmail.com>"]
 description = "A simple crate to query remote packages for information."
 license = "MIT"
 repository = "https://github.com/cmeister2/remote-package"
-rust-version = "1.59"
+rust-version = "1.88"
 keywords = ["rpm", "debian", "package"]
 categories = ["development-tools"]
 
 [dependencies]
 debpkg = { version = "0.6.0", optional = true }
-reqwest = { version = ">=0.11.18, <0.11.19", features = ["blocking"], optional = true }
-fez = { package = "fez", version = "0.8.1", default-features = false, features = ["async-tokio", "signature-meta"], optional = true }
-futures = { version = "0.3", optional = true }
-tokio-util = { version = "0.7", features = ["compat"], optional = true }
-thiserror = ">=1.0.65, <1.0.66"
-infer = "0.13.0"
+reqwest = { version = "0.13.5", features = ["blocking"], optional = true }
+rpm = { version = "0.30.2", default-features = false, optional = true }
+thiserror = "2.0.21"
+infer = { version = "0.22.0", optional = true }
 
 [features]
 default = ["http", "debian", "rpm"]
-http = [ "reqwest" ]
-debian = [ "debpkg" ]
-rpm = [ "fez", "futures", "tokio-util" ]
+http = ["dep:reqwest", "dep:infer"]
+debian = ["dep:debpkg"]
+rpm = ["dep:rpm"]
+
+[lints.rust]
+missing_docs = "deny"
+
+[lints.clippy]
+missing_docs_in_private_items = "deny"
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+
+[dev-dependencies]
+ar = "0.9.0"
+futures = "0.3.34"
+rpm = { version = "0.30.2", default-features = false, features = ["payload"] }
+tar = "0.4.46"
