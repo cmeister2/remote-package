@@ -1,5 +1,5 @@
 //! Support for remote RPM packages
-use std::io::Read;
+use std::{future::Future, io::Read};
 
 use fez::RPMPackageMetadata;
 use futures::{io::AllowStdIo, FutureExt};
@@ -10,6 +10,19 @@ use crate::{PkgError, RemotePackage};
 /// A structure representing a remote RPM package.
 pub struct RpmRemotePackage {
     metadata: RPMPackageMetadata,
+}
+
+// The synchronous Read API must finish in one poll, including when called from
+// an existing executor. Keep that policy separate from Fez's metadata parsing.
+fn finish_metadata_parse(
+    parse: impl Future<Output = Result<RPMPackageMetadata, fez::RPMError>>,
+) -> Result<RPMPackageMetadata, fez::RPMError> {
+    parse.now_or_never().ok_or_else(|| {
+        fez::RPMError::Io(std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "RPM metadata parser unexpectedly suspended on a blocking reader",
+        ))
+    })?
 }
 
 impl RpmRemotePackage {
@@ -41,14 +54,7 @@ impl RpmRemotePackage {
         // Fez's metadata parser only awaits exact reads. AllowStdIo always
         // returns Ready, and Tokio's read_exact adds no cooperative suspension.
         // Polling once also preserves use inside an existing async executor.
-        let metadata = RPMPackageMetadata::parse_async(&mut reader)
-            .now_or_never()
-            .ok_or_else(|| {
-                fez::RPMError::Io(std::io::Error::new(
-                    std::io::ErrorKind::WouldBlock,
-                    "RPM metadata parser unexpectedly suspended on a blocking reader",
-                ))
-            })??;
+        let metadata = finish_metadata_parse(RPMPackageMetadata::parse_async(&mut reader))?;
 
         Ok(Self { metadata })
     }
@@ -80,6 +86,40 @@ impl RemotePackage for RpmRemotePackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_metadata_parser_that_suspends_without_polling_again() {
+        use std::{cell::Cell, task::Poll};
+
+        let polls = Cell::new(0);
+        let parse = futures::future::poll_fn(|_| {
+            polls.set(polls.get() + 1);
+            Poll::Pending
+        });
+        let error =
+            finish_metadata_parse(parse).expect_err("A suspended parser must return an error");
+        match error {
+            fez::RPMError::Io(error) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock)
+            }
+            other => panic!("Unexpected parser error: {:?}", other),
+        }
+        assert_eq!(polls.get(), 1);
+    }
+
+    #[test]
+    fn propagates_truncated_metadata_errors() {
+        let reader = std::io::Cursor::new(Vec::<u8>::new());
+        let error = RpmRemotePackage::new_from_read(reader)
+            .err()
+            .expect("Truncated RPM metadata must return an error");
+        match error {
+            PkgError::RpmError(fez::RPMError::Io(error)) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof)
+            }
+            other => panic!("Unexpected package error: {:?}", other),
+        }
+    }
 
     #[test]
     fn reads_metadata_inside_an_executor_without_reading_payload_or_requiring_unpin() {
