@@ -1,5 +1,8 @@
 //! Support for remote RPM packages
-use std::{future::Future, io::Read};
+use std::{
+    future::Future,
+    io::{self, Read},
+};
 
 use fez::RPMPackageMetadata;
 use futures::{io::AllowStdIo, FutureExt};
@@ -17,12 +20,10 @@ pub struct RpmRemotePackage {
 fn finish_metadata_parse(
     parse: impl Future<Output = Result<RPMPackageMetadata, fez::RPMError>>,
 ) -> Result<RPMPackageMetadata, fez::RPMError> {
-    parse.now_or_never().ok_or_else(|| {
-        fez::RPMError::Io(std::io::Error::new(
-            std::io::ErrorKind::WouldBlock,
-            "RPM metadata parser unexpectedly suspended on a blocking reader",
-        ))
-    })?
+    const SUSPENDED: &str = "RPM metadata parser unexpectedly suspended on a blocking reader";
+    parse
+        .now_or_never()
+        .ok_or_else(|| fez::RPMError::Io(io::Error::new(io::ErrorKind::WouldBlock, SUSPENDED)))?
 }
 
 impl RpmRemotePackage {
@@ -100,7 +101,7 @@ mod tests {
             finish_metadata_parse(parse).expect_err("A suspended parser must return an error");
         match error {
             fez::RPMError::Io(error) => {
-                assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock)
+                assert_eq!(error.kind(), io::ErrorKind::WouldBlock)
             }
             other => panic!("Unexpected parser error: {:?}", other),
         }
@@ -109,13 +110,13 @@ mod tests {
 
     #[test]
     fn propagates_truncated_metadata_errors() {
-        let reader = std::io::Cursor::new(Vec::<u8>::new());
+        let reader = io::Cursor::new(Vec::<u8>::new());
         let error = RpmRemotePackage::new_from_read(reader)
             .err()
             .expect("Truncated RPM metadata must return an error");
         match error {
             PkgError::RpmError(fez::RPMError::Io(error)) => {
-                assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof)
+                assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof)
             }
             other => panic!("Unexpected package error: {:?}", other),
         }
@@ -141,7 +142,7 @@ mod tests {
         }
 
         impl Read for MetadataReader {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
                 let remaining = self.metadata_length - self.bytes.position() as usize;
                 assert!(
                     remaining > 0,
