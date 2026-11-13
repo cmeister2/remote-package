@@ -33,6 +33,46 @@
         "thiserror"
       ],
       "allowedVersions": "<1.0.66"
+    },
+    {
+      "description": "Retain dependencies compatible with the declared Rust 1.59 minimum",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "libc"
+      ],
+      "allowedVersions": "<=0.2.163"
+    },
+    {
+      "description": "Retain dependencies compatible with the declared Rust 1.59 minimum",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "/^futures(?:-|$)/"
+      ],
+      "allowedVersions": "<=0.3.31"
+    },
+    {
+      "description": "Retain dependencies compatible with the declared Rust 1.59 minimum",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "tokio"
+      ],
+      "allowedVersions": "<1.30"
+    },
+    {
+      "description": "Retain dependencies compatible with the declared Rust 1.59 minimum",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "tokio-util"
+      ],
+      "allowedVersions": "<=0.7.8"
     }
   ]
 }
